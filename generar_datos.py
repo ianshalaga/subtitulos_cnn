@@ -8,6 +8,7 @@ import subprocess # Para ejecutar comandos de consola
 import sys
 import numpy as np
 import cv2
+import multiprocessing as mp
 
 def conversion_segundos(tiempo_string):
     '''
@@ -73,6 +74,107 @@ def obtener_tiempos(subtitulos_ruta, fps):
 
     return tiempos_frames_etiquetas
 
+def extraer_subtitulos(videos_directorio):
+    archivos_en_directorio = os.listdir(videos_directorio)
+    for archivo in archivos_en_directorio:
+        archivo_split = archivo.split(".")
+        if len(archivo_split) > 1: # Evitar archivos sin extensión o directorios
+            archivo_nombre = archivo_split[0]
+            archivo_extension = archivo_split[1]
+            if archivo_extension == "mkv": # Se analizan solo lor archivos con extension mkv
+                video_ruta = os.path.join(videos_directorio, archivo)
+                if archivo_nombre + ".srt" and archivo_nombre + ".ass" in archivos_en_directorio:
+                    print("Los archivos de subtítulos {} y {} ya existen.".format(archivo_nombre + ".srt", archivo_nombre + ".ass"))
+                else: # Se extraen los subtítulos en los formatos srt y ass
+                    print("Extrayendo subtítulos en formato SRT de {}".format(archivo))
+                    subtitulo_salida = os.path.join(videos_directorio, archivo_nombre) + ".srt"
+                    subprocess.run(["ffmpeg.exe",
+                                    "-loglevel", "quiet",
+                                    "-i",
+                                    video_ruta,
+                                    "-vn", "-an", "-dn",
+                                    subtitulo_salida,
+                                    "-hide_banner"])
+                    print("Extrayendo subtítulos en formato ASS de {}".format(archivo))
+                    subtitulo_salida = os.path.join(videos_directorio, archivo_nombre) + ".ass"
+                    subprocess.run(["ffmpeg.exe",
+                                    "-loglevel", "quiet",
+                                    "-i",
+                                    video_ruta,
+                                    "-vn", "-an", "-dn",
+                                    subtitulo_salida,
+                                    "-hide_banner"])
+
+def incrustar_subtitulos(videos_directorio):
+    archivos_en_directorio = os.listdir(videos_directorio)
+    for archivo in archivos_en_directorio:
+        archivo_split = archivo.split(".")
+        if len(archivo_split) > 1: # Evitar archivos sin extensión o directorios
+            archivo_nombre = archivo_split[0]
+            archivo_extension = archivo_split[1]
+            if archivo_extension == "mkv": # Se analizan solo lor archivos con extension mkv
+                video_ruta = os.path.join(videos_directorio, archivo)
+                if archivo_nombre + ".mp4" not in archivos_en_directorio:
+                    print("Incrustando {} en {}.".format(archivo_nombre + ".ass", archivo))
+                    video_salida = os.path.join(videos_directorio, archivo_nombre) + ".mp4"
+                    cadena = "subtitles=./videos/" + archivo_nombre + ".ass"
+                    subprocess.run(["ffmpeg.exe",
+                                    "-loglevel", "level",
+                                    "-i",
+                                    video_ruta,
+                                    "-filter_complex",
+                                    cadena,
+                                    video_salida,
+                                    "-hide_banner"])
+                else:
+                    print("El archivo con subtítulos incrustados {} ya existe.".format(archivo_nombre + ".mp4"))
+
+def extraer_fotogramas(videos_directorio):
+    archivos_en_directorio = os.listdir(videos_directorio)
+    for archivo in archivos_en_directorio:
+        archivo_split = archivo.split(".")
+        if len(archivo_split) > 1: # Evitar archivos sin extensión o directorios
+            archivo_nombre = archivo_split[0]
+            archivo_extension = archivo_split[1]
+            if archivo_extension == "mp4": # Se analizan solo lor archivos con extension mp4
+                video_ruta = os.path.join(videos_directorio, archivo)
+                cap = cv2.VideoCapture(video_ruta)
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                subtitulos_ruta = os.path.join(videos_directorio, archivo_nombre) + ".srt"
+                tiempos_frames_etiquetas = obtener_tiempos(subtitulos_ruta, fps)
+                contador = 0
+                for tiempo in tiempos_frames_etiquetas:
+                    print("Extrayendo fotogramas {} de {} ({}/{}).".format(tiempo, archivo, contador+1, len(tiempos_frames_etiquetas)))
+                    imagen_salida = os.path.join(videos_directorio, "images", archivo_nombre)
+                    subprocess.run(["ffmpeg.exe",
+                                    "-loglevel", "quiet",
+                                    "-i",
+                                    video_ruta,
+                                    "-ss", tiempo[0],
+                                    "-vframes", tiempo[1],
+                                    imagen_salida + "_" + str(contador) + "_imagen%04d_" + tiempo[2] + ".jpg",
+                                    "-hide_banner"])
+                    contador += 1
+
+def convertir_fotogramas(videos_directorio, dimension):
+    dataset_directorio = os.path.join(videos_directorio, "dataset")
+    imagenes_directorio = os.path.join(videos_directorio, "images")                                    
+    imagenes_en_directorio = os.listdir(imagenes_directorio)
+    for imagen in imagenes_en_directorio:
+        print("Convirtiendo {}".format(imagen))
+        imagen_ruta = os.path.join(imagenes_directorio, imagen)
+        img = cv2.imread(imagen_ruta, cv2.IMREAD_COLOR)
+        alto, ancho, canales = img.shape # filas, columnas, profundidad
+        negro = np.zeros((ancho, ancho, 3), np.uint8)
+        inicio = int((ancho-alto)/2)
+        negro[inicio:inicio+alto, :] = img
+        img = cv2.resize(negro, (dimension, dimension))
+        # cv2.imshow("Fotograma",img)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
+        imagen_salida = os.path.join(dataset_directorio, imagen)
+        cv2.imwrite(imagen_salida, img)
+
 def extraer_fotogramas_etiquetados(videos_directorio):
     '''
     Genera el dataset para la red neuronal a partir de archivos mkv con subtítulos flotantes.
@@ -92,38 +194,61 @@ def extraer_fotogramas_etiquetados(videos_directorio):
                     print("Los archivos de subtítulos ya existen.")
                 else: # Se extraen los subtítulos en los formatos srt y ass
                     subtitulo_salida = os.path.join(videos_directorio, nombre_extension[0]) + ".srt"
-                    subprocess.run(["ffmpeg.exe", "-i",
+                    subprocess.run(["ffmpeg.exe",
+                                    "-loglevel", "quiet",
+                                    "-i",
                                     video_ruta,
                                     "-vn", "-an", "-dn",
                                     subtitulo_salida,
                                     "-hide_banner"])
                     subtitulo_salida = os.path.join(videos_directorio, nombre_extension[0]) + ".ass"
-                    subprocess.run(["ffmpeg.exe", "-i",
+                    subprocess.run(["ffmpeg.exe",
+                                    "-loglevel", "quiet",
+                                    "-i",
                                     video_ruta,
                                     "-vn", "-an", "-dn",
                                     subtitulo_salida,
                                     "-hide_banner"])
 
+                # archivos_en_directorio = os.listdir(videos_directorio)
                 if nombre_extension[0] + ".mp4" in archivos_en_directorio: # Se extraen las imágenes
                     imagenes_ruta = os.path.join(videos_directorio, "images")
                     archivos_imagen = os.listdir(imagenes_ruta)
                     video_entrada = os.path.join(videos_directorio, nombre_extension[0]) + ".mp4"
                     imagen_salida = os.path.join(videos_directorio, "images", nombre_extension[0])
-                    for imagen in archivos_imagen:
-                        if nombre_extension[0] not in imagen:
-                            cap = cv2.VideoCapture(video_entrada)
-                            fps = cap.get(cv2.CAP_PROP_FPS)
-                            subtitulos_ruta = os.path.join(videos_directorio, nombre_extension[0]) + ".srt"
-                            tiempos_frames_etiquetas = obtener_tiempos(subtitulos_ruta, fps)
-                            contador = 0
-                            for tiempo in tiempos_frames_etiquetas:
-                                subprocess.run(["ffmpeg.exe", "-i",
-                                                video_entrada,
-                                                "-ss", tiempo[0],
-                                                "-vframes", tiempo[1],
-                                                imagen_salida + "_" + str(contador) + "_imagen%04d_" + tiempo[2] + ".jpg",
-                                                "-hide_banner"])
-                                contador += 1
+                    if archivos_imagen == []:
+                        cap = cv2.VideoCapture(video_entrada)
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        subtitulos_ruta = os.path.join(videos_directorio, nombre_extension[0]) + ".srt"
+                        tiempos_frames_etiquetas = obtener_tiempos(subtitulos_ruta, fps)
+                        contador = 0
+                        for tiempo in tiempos_frames_etiquetas:
+                            subprocess.run(["ffmpeg.exe", "-i",
+                                            video_entrada,
+                                            "-ss", tiempo[0],
+                                            "-vframes", tiempo[1],
+                                            imagen_salida + "_" + str(contador) + "_imagen%04d_" + tiempo[2] + ".jpg",
+                                            "-hide_banner"])
+                            contador += 1
+                    else:
+                        for imagen in archivos_imagen:
+                            if nombre_extension[0] not in imagen.split("_"):
+                                cap = cv2.VideoCapture(video_entrada)
+                                fps = cap.get(cv2.CAP_PROP_FPS)
+                                subtitulos_ruta = os.path.join(videos_directorio, nombre_extension[0]) + ".srt"
+                                tiempos_frames_etiquetas = obtener_tiempos(subtitulos_ruta, fps)
+                                contador = 0
+                                for tiempo in tiempos_frames_etiquetas:
+                                    print("Entrayendo fotogramas para: {}".format(tiempo))
+                                    subprocess.run(["ffmpeg.exe",
+                                                    "-loglevel", "quiet",
+                                                    "-i",
+                                                    video_entrada,
+                                                    "-ss", tiempo[0],
+                                                    "-vframes", tiempo[1],
+                                                    imagen_salida + "_" + str(contador) + "_imagen%04d_" + tiempo[2] + ".jpg",
+                                                    "-hide_banner"])
+                                    contador += 1
                 else: # Se incrustan los subtítulos ass en un archivo de salida mp4
                     video_salida = os.path.join(videos_directorio, nombre_extension[0]) + ".mp4"
                     cadena = "subtitles=./videos/" + nombre_extension[0] + ".ass"
@@ -139,6 +264,7 @@ def extraer_fotogramas_etiquetados(videos_directorio):
     imagenes_directorio = os.path.join(videos_directorio, "images")                                    
     imagenes_en_directorio = os.listdir(imagenes_directorio)
     for imagen in imagenes_en_directorio:
+        print("Convirtiendo {}".format(imagen))
         imagen_ruta = os.path.join(imagenes_directorio, imagen)
         img = cv2.imread(imagen_ruta, cv2.IMREAD_COLOR)
         alto, ancho, canales = img.shape # filas, columnas, profundidad
@@ -159,4 +285,8 @@ if __name__ == "__main__":
         print("Modo de uso: {} <videos_directorio>".format(sys.argv[0])) # argv[0] es el nombre de la función
         exit()
 
-    extraer_fotogramas_etiquetados(sys.argv[1])
+    # extraer_subtitulos(sys.argv[1])
+    # incrustar_subtitulos(sys.argv[1])
+    # extraer_fotogramas(sys.argv[1])
+    convertir_fotogramas(sys.argv[1], 250)
+    # extraer_fotogramas_etiquetados(sys.argv[1])
