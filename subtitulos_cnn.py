@@ -7,7 +7,8 @@ import random
 import cv2
 import numpy as np
 from keras.models import Sequential
-from keras.layers import Flatten, Dense, Dropout, Conv2D, MaxPooling2D
+from keras.layers import Flatten, Dense, Dropout, Conv2D, MaxPooling2D, GlobalMaxPooling2D
+from keras.callbacks import EarlyStopping
 
 def cargar_ejemplos(dataset_directorio, cantidad_ejemplos, porcentaje_prueba):
     '''
@@ -130,10 +131,10 @@ def subtitulos_cnn(dataset_directorio):
     '''
 
     '''VARIABLES GLOBALES'''
-    CANTIDAD_EJEMPLOS = 6600
+    CANTIDAD_EJEMPLOS = 6000
     PORCENTAJE_PRUEBA = 0.2
     PARTICIONES = 10
-    CANTIDAD_EPOCAS = 10
+    CANTIDAD_EPOCAS = 100
     PORCENTAJE_VALIDACION = 0.2
     NEURONAS_SALIDA = 1
     NEURONAS_OCULTAS = 256
@@ -145,7 +146,7 @@ def subtitulos_cnn(dataset_directorio):
     DIMENSION_BATCH = 32
     ACTIVACION_OCULTA = "relu"
     ACTIVACION_SALIDA = "sigmoid"
-    FUNCION_ERROR = "mean_squared_error"
+    FUNCION_ERROR = "binary_crossentropy"
     OPTIMIZADOR = "adam"
     '''------------------'''
 
@@ -205,7 +206,12 @@ def subtitulos_cnn(dataset_directorio):
         # Detalles del modelo neuronal
         modelo.summary()
 
-        print("Partción {}/{}".format(particion+1, PARTICIONES))
+        print("Partición {}/{}".format(particion+1, PARTICIONES))
+
+        parada_temprana = [EarlyStopping(monitor = 'val_loss',
+                                         patience = 0,
+                                         verbose = 2,
+                                         mode = 'auto')]
 
         # Entrenamiento del modelo
         registro = modelo.fit(x=x_entrenamiento[folds_dict[particion][0]],
@@ -213,9 +219,9 @@ def subtitulos_cnn(dataset_directorio):
                               batch_size=DIMENSION_BATCH,
                               epochs=CANTIDAD_EPOCAS,
                               verbose=1,
-                              callbacks=None,
+                              callbacks=parada_temprana,
                               validation_data=(x_entrenamiento[folds_dict[particion][1]], y_entrenamiento[folds_dict[particion][1]]),
-                              shuffle=False)
+                              shuffle=True)
 
         # Evaluación del modelo
         error_prueba, acierto_prueba = modelo.evaluate(x_prueba, y_prueba)
@@ -255,6 +261,7 @@ def subtitulos_cnn(dataset_directorio):
     print("Características de los datos de entrada:")
     print("\tCantidad total de ejemplos cargados: {}".format(CANTIDAD_EJEMPLOS))
     print("\tCantidad de ejemplos de entrenamiento: {}".format(cantidad_ejemplos_entrenamiento))
+    # print("\tCantidad de ejemplos de entrenamiento: {}".format(cantidad_ejemplos_entrenamiento))
     print("\tCantidad de ejemplos de prueba: {}".format(cantidad_ejemplos_prueba))
     print("\tAltura de los ejemplos (filas): {}".format(ejemplos_altura))
     print("\tAncho de los ejemplos (Columnas): {}".format(ejemplos_ancho))
